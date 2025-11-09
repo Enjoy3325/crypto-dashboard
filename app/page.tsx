@@ -3,10 +3,14 @@
 import { easeInOut, motion } from 'framer-motion'
 import { useEffect, useState } from 'react'
 
-import CryptoChart from './components/CryptoChart/CryptoChart'
+import { CryptoChart } from './components/CryptoChart/CryptoChart'
 import Preloader from './components/Preloader/Preloader'
 
-export default function Home() {
+interface HomeProps {
+	data: { date: string; price: number }[]
+}
+
+export default function Home({ data }: HomeProps) {
 	const [isLoading, setIsLoading] = useState(true)
 	const [neonPulse, setNeonPulse] = useState(false)
 
@@ -100,8 +104,6 @@ export default function Home() {
 						}}
 					>
 						<div className='relative overflow-hidden rounded-3xl bg-gradient-to-br from-yellow-300/10 via-purple-400/10 to-blue-500/10 border border-gray-700/40 p-10 md:p-24 backdrop-blur-xl shadow-xl'>
-					
-						
 							{/* Decorative neon */}
 							<motion.div
 								className='absolute top-10 right-10 w-40 h-40 bg-yellow-400/20 rounded-full blur-2xl'
@@ -124,14 +126,13 @@ export default function Home() {
 							},
 						}}
 					>
-						<CryptoChart />
+						<CryptoChart data={data} />
 					</motion.div>
 				</div>
 			</motion.div>
-      <footer className="mt-14 w-full pt-8 pb-9 text-center text-xs text-slate-500 tracking-wider font-light">
-  © {new Date().getFullYear()} CryptoHub
-</footer>
-
+			<footer className='mt-14 w-full pt-8 pb-9 text-center text-xs text-slate-500 tracking-wider font-light'>
+				© {new Date().getFullYear()} CryptoHub
+			</footer>
 		</div>
 	)
 }

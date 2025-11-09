@@ -15,7 +15,6 @@ import { useEffect, useMemo, useState } from 'react'
 
 import { BiBitcoin } from 'react-icons/bi'
 import { SiSolana } from 'react-icons/si'
-import { linearGradient } from 'framer-motion/m'
 
 type ChartType = 'area' | 'line' | 'split'
 type ChartTimeframe = '24h' | '7d' | '30d'
@@ -46,8 +45,21 @@ function formatXAxis(val: number, timeframe: ChartTimeframe) {
 		year: 'numeric',
 	})
 }
+interface PriceTooltipProps {
+	active?: boolean
+	payload?: {
+		value: number
+		dataKey: string
+		payload?: { timeframe?: ChartTimeframe }
+	}[]
+	label?: string | number
+}
 
-const PriceTooltip = ({ active, payload, label }) => {
+const PriceTooltip: React.FC<PriceTooltipProps> = ({
+	active,
+	payload,
+	label,
+}) => {
 	if (active && payload && payload.length) {
 		return (
 			<div
@@ -93,50 +105,70 @@ const PriceTooltip = ({ active, payload, label }) => {
 			</div>
 		)
 	}
+
 	return null
 }
 
-export default function CryptoChart() {
+interface CryptoChartProps {
+	data: { date: string; price: number }[]
+}
+
+export const CryptoChart: React.FC<CryptoChartProps> = ({ data }) => {
 	const [now, setNow] = useState<Date | null>(null)
 	const [prices, setPrices] = useState<CryptoPrice | null>(null)
-	const [data, setData] = useState<ChartDatum[]>([])
+	const [chartData, setChartData] = useState<ChartDatum[]>([])
 	const [timeframe, setTimeframe] = useState<ChartTimeframe>('24h')
 	const [chartType, setChartType] = useState<ChartType>('line')
 
+	// Set current time on mount
 	useEffect(() => {
 		setNow(new Date())
 	}, [])
 
+	// Update current time every second
 	useEffect(() => {
 		if (!now) setNow(new Date())
 		const timer = setInterval(() => setNow(new Date()), 1000)
 		return () => clearInterval(timer)
 	}, [now])
 
+	// Fetch current prices on mount
 	useEffect(() => {
-		fetch('/api/crypto/prices')
-			.then(r => r.json())
-			.then(json =>
+		const fetchPrices = async () => {
+			try {
+				const res = await fetch('/api/crypto/prices')
+				if (!res.ok) throw new Error('Error receiving prices')
+				const json = await res.json()
+
 				setPrices({
 					bitcoin: {
 						usd: json.bitcoin?.usd ?? 0,
 						usd_24h_change: json.bitcoin?.usd_24h_change ?? 0,
-						usd_market_cap: json.bitcoin?.usd_market_cap ?? undefined,
+						usd_market_cap: json.bitcoin?.usd_market_cap ?? 0,
 					},
 					solana: {
 						usd: json.solana?.usd ?? 0,
 						usd_24h_change: json.solana?.usd_24h_change ?? 0,
-						usd_market_cap: json.solana?.usd_market_cap ?? undefined,
+						usd_market_cap: json.solana?.usd_market_cap ?? 0,
 					},
 				})
-			)
+			} catch (error) {
+				console.error('Error loading prices:', error)
+			}
+		}
+
+		fetchPrices()
 	}, [])
 
+	// Fetch historical data when timeframe changes
 	useEffect(() => {
-		fetch(`/api/crypto/history?timeframe=${timeframe}`)
-			.then(r => r.json())
-			.then(series =>
-				setData(
+		const fetchHistory = async () => {
+			try {
+				const res = await fetch(`/api/crypto/history?timeframe=${timeframe}`)
+				if (!res.ok) throw new Error('Error retrieving history')
+				const series = await res.json()
+
+				setChartData(
 					series.map((item: any) => ({
 						time: Number(item.time),
 						BTC: Number(item.BTC),
@@ -144,11 +176,16 @@ export default function CryptoChart() {
 						timeframe,
 					}))
 				)
-			)
+			} catch (error) {
+				console.error('Error loading history:', error)
+			}
+		}
+
+		fetchHistory()
 	}, [timeframe])
 
-	const btcVals = useMemo(() => data.map(d => d.BTC), [data])
-	const solVals = useMemo(() => data.map(d => d.SOL), [data])
+	const btcVals = useMemo(() => chartData.map(d => d.BTC), [chartData])
+	const solVals = useMemo(() => chartData.map(d => d.SOL), [chartData])
 	const btcMin = Math.min(...btcVals)
 	const btcMax = Math.max(...btcVals)
 	const solMin = Math.min(...solVals)
@@ -156,10 +193,10 @@ export default function CryptoChart() {
 	const btcVolume = btcVals.reduce((acc, v) => acc + v, 0)
 	const solVolume = solVals.reduce((acc, v) => acc + v, 0)
 
-	const getChangeColor = (change: number | string) =>
-		change > '+'
+	const getChangeColor = (change: number) =>
+		change > 0
 			? 'text-green-400'
-			: change < '-'
+			: change < 0
 			? 'text-red-400'
 			: 'text-slate-400'
 
@@ -179,8 +216,12 @@ export default function CryptoChart() {
 		ChartBlock = (
 			<div className='flex flex-col md:flex-row gap-8 lg:gap-12 mt-8 mb-10'>
 				<div className='flex-1 rounded-2xl p-6 lg:p-8 bg-gradient-to-br from-[#181d3b] to-[#181f2a]'>
-					<ResponsiveContainer width='100%' height={200}>
-						<LineChart className='glow-btc' data={data}>
+					<ResponsiveContainer
+						width='100%'
+						height={340}
+						className='pointer-events-none'
+					>
+						<LineChart className='glow-btc' data={chartData}>
 							<XAxis
 								dataKey='time'
 								tickFormatter={v => formatXAxis(Number(v), timeframe)}
@@ -192,7 +233,10 @@ export default function CryptoChart() {
 								tick={{ fill: '#FFD700', fontSize: 16 }}
 								stroke='none'
 							/>
-							<Tooltip content={PriceTooltip} cursor={false} />
+							<Tooltip
+								content={props => <PriceTooltip {...props} />}
+								cursor={false}
+							/>
 							<Line
 								type='monotone'
 								isAnimationActive={false}
@@ -201,13 +245,18 @@ export default function CryptoChart() {
 								stroke='#FFD700'
 								strokeWidth={4}
 								dot={true}
+								className='pointer-events-auto'
 							/>
 						</LineChart>
 					</ResponsiveContainer>
 				</div>
 				<div className='flex-1 rounded-2xl p-6 lg:p-8 bg-gradient-to-br from-[#0c4035] to-[#26473b]'>
-					<ResponsiveContainer width='100%' height={200}>
-						<LineChart className='glow-sol' data={data}>
+					<ResponsiveContainer
+						width='100%'
+						height={340}
+						className='pointer-events-none'
+					>
+						<LineChart className='glow-sol' data={chartData}>
 							<XAxis
 								dataKey='time'
 								tickFormatter={v => formatXAxis(Number(v), timeframe)}
@@ -219,7 +268,10 @@ export default function CryptoChart() {
 								tick={{ fill: '#00ffa5', fontSize: 16 }}
 								stroke='none'
 							/>
-							<Tooltip content={PriceTooltip} cursor={false} />
+							<Tooltip
+								content={props => <PriceTooltip {...props} />}
+								cursor={false}
+							/>
 							<Line
 								type='monotone'
 								isAnimationActive={false}
@@ -228,6 +280,7 @@ export default function CryptoChart() {
 								stroke='#00ffa5'
 								strokeWidth={4}
 								dot={true}
+								className='pointer-events-auto'
 							/>
 						</LineChart>
 					</ResponsiveContainer>
@@ -236,8 +289,12 @@ export default function CryptoChart() {
 		)
 	} else if (chartType === 'area') {
 		ChartBlock = (
-			<ResponsiveContainer width='100%' height={340}>
-				<AreaChart data={data}>
+			<ResponsiveContainer
+				width='100%'
+				height={340}
+				className='pointer-events-none'
+			>
+				<AreaChart data={chartData}>
 					<defs>
 						<linearGradient
 							className='glow-btc'
@@ -281,7 +338,10 @@ export default function CryptoChart() {
 						tick={{ fill: '#00ffa5', fontSize: 16 }}
 						stroke='none'
 					/>
-					<Tooltip content={PriceTooltip} cursor={false} />
+					<Tooltip
+						content={props => <PriceTooltip {...props} />}
+						cursor={false}
+					/>
 					<Area
 						yAxisId='left'
 						type='monotone'
@@ -309,8 +369,12 @@ export default function CryptoChart() {
 		)
 	} else {
 		ChartBlock = (
-			<ResponsiveContainer width='100%' height={340}>
-				<LineChart className='glow-btc' data={data}>
+			<ResponsiveContainer
+				width='100%'
+				height={340}
+				className='pointer-events-none'
+			>
+				<LineChart className='glow-btc' data={chartData}>
 					<XAxis
 						dataKey='time'
 						tickFormatter={v => formatXAxis(Number(v), timeframe)}
@@ -330,9 +394,12 @@ export default function CryptoChart() {
 						tick={{ fill: '#00ffa5', fontSize: 16 }}
 						stroke='none'
 					/>
-					<Tooltip content={PriceTooltip} cursor={false} />
+					<Tooltip
+						content={props => <PriceTooltip {...props} />}
+						cursor={false}
+					/>
 					<Line
-						className='glow-btc'
+						className='glow-btc, pointer-events-auto'
 						yAxisId='left'
 						type='monotone'
 						isAnimationActive={false}
@@ -351,6 +418,7 @@ export default function CryptoChart() {
 						strokeWidth={4}
 						dot={true}
 						name='SOL'
+						className='pointer-events-auto'
 					/>
 				</LineChart>
 			</ResponsiveContainer>
@@ -359,7 +427,7 @@ export default function CryptoChart() {
 
 	return (
 		<div className='w-full max-w-[1600px] mx-auto py-6 sm:py-8 md:py-12 lg:py-16 px-4 sm:px-6 md:px-10 lg:px-16 xl:px-24 2xl:px-32'>
-			{/* Big Title */}
+			{/* Header Section */}
 			<div className='font-black text-center text-4xl sm:text-5xl md:text-6xl tracking-tight text-slate-100 mt-4 sm:mt-6 md:mt-8 mb-4 sm:mb-5 md:mb-6'>
 				Crypto Dashboard
 			</div>
@@ -502,15 +570,17 @@ export default function CryptoChart() {
 					</div>
 				</div>
 			</div>
-
 			{/* Buttons Section */}
-			<div className='mb-10 sm:mb-12 md:mb-14 px-2 sm:px-4' style={{ position: 'relative', zIndex: 10 }}>
+			<div
+				className='mb-10 sm:mb-12 md:mb-14 px-2 sm:px-4 z-[999]'
+				style={{ position: 'relative' }}
+			>
 				{/* Timeframe Buttons */}
 				<div className='mb-8 sm:mb-10'>
 					<h3 className='text-center text-lg sm:text-xl font-bold text-slate-300 mb-4 sm:mb-5'>
 						Time Period
 					</h3>
-					<div className='flex flex-wrap justify-center gap-4 sm:gap-5 md:gap-6' style={{ zIndex: 10 }}>
+					<div className='flex flex-wrap justify-center gap-4 sm:gap-5 md:gap-6 relative z-0'>
 						{buttons.map(btn => (
 							<button
 								key={btn.value}
@@ -528,9 +598,8 @@ export default function CryptoChart() {
 									userSelect: 'none',
 									WebkitTapHighlightColor: 'transparent',
 									border: 'none',
-                  pointerEvents: 'auto',
 								}}
-								className='transition-all duration-200 ease-out px-12 sm:px-14 md:px-16 py-5 sm:py-6 rounded-2xl font-black text-xl sm:text-2xl min-w-[130px] sm:min-w-[150px] shadow-lg hover:scale-105 active:scale-95 outline-none focus:ring-4 focus:ring-yellow-400/50'
+								className='transition-all duration-200 ease-out px-12 sm:px-14 md:px-16 py-5 sm:py-6 rounded-2xl font-black text-xl sm:text-2xl min-w-[130px] sm:min-w-[150px] shadow-lg hover:scale-105 active:scale-95 outline-none focus:ring-4 focus:ring-yellow-400/50 cursor-pointer'
 							>
 								{btn.label}
 							</button>
@@ -543,7 +612,7 @@ export default function CryptoChart() {
 					<h3 className='text-center text-lg sm:text-xl font-bold text-slate-300 mb-4 sm:mb-5'>
 						Chart Type
 					</h3>
-					<div className='flex flex-wrap justify-center gap-4 sm:gap-5 md:gap-6' style={{ zIndex: 10 }}>
+					<div className='flex flex-wrap justify-center gap-4 sm:gap-5 md:gap-6 relative z-0'>
 						{chartBtns.map(btn => (
 							<button
 								key={btn.value}
@@ -561,9 +630,8 @@ export default function CryptoChart() {
 									userSelect: 'none',
 									WebkitTapHighlightColor: 'transparent',
 									border: 'none',
-                  pointerEvents: 'auto', 
 								}}
-								className='transition-all duration-200 ease-out px-12 sm:px-14 md:px-16 py-5 sm:py-6 rounded-2xl font-black text-xl sm:text-2xl min-w-[130px] sm:min-w-[160px] shadow-lg hover:scale-105 active:scale-95 outline-none focus:ring-4 focus:ring-green-400/50'
+								className='transition-all duration-200 ease-out px-12 sm:px-14 md:px-16 py-5 sm:py-6 rounded-2xl font-black text-xl sm:text-2xl min-w-[130px] sm:min-w-[160px] shadow-lg hover:scale-105 active:scale-95 outline-none focus:ring-4 focus:ring-green-400/50 cursor-pointer'
 							>
 								{btn.label}
 							</button>
@@ -636,7 +704,6 @@ export default function CryptoChart() {
 					exit={{ opacity: 0, scale: 0.98 }}
 					transition={{ duration: 0.4, ease: 'easeInOut' }}
 					className='rounded-3xl bg-gradient-to-br from-[#181d3b]/92 to-[#101e2c] p-6 sm:p-10 md:p-14 lg:p-16 xl:p-20 shadow-2xl'
-          style={{ pointerEvents: 'auto', zIndex: 0 }}
 				>
 					{ChartBlock}
 				</motion.div>
