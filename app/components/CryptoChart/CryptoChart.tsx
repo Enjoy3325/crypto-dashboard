@@ -4,6 +4,7 @@ import { AnimatePresence, motion } from 'framer-motion'
 import {
 	Area,
 	AreaChart,
+	CartesianGrid,
 	Line,
 	LineChart,
 	ResponsiveContainer,
@@ -11,10 +12,13 @@ import {
 	XAxis,
 	YAxis,
 } from 'recharts'
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 
 import { BiBitcoin } from 'react-icons/bi'
+import { CustomDot } from '@/app/utils/CustomDot'
+import { FramerTooltip } from '../FramerTooltip/FramerTooltip'
 import { SiSolana } from 'react-icons/si'
+import { SplitDot } from '@/app/utils/SplitDot'
 
 type ChartType = 'area' | 'line' | 'split'
 type ChartTimeframe = '24h' | '7d' | '30d'
@@ -23,6 +27,8 @@ interface ChartDatum {
 	time: number
 	BTC: number
 	SOL: number
+	BTCChange: number
+	SOLChange: number
 	timeframe?: ChartTimeframe
 }
 
@@ -53,6 +59,12 @@ interface PriceTooltipProps {
 		payload?: { timeframe?: ChartTimeframe }
 	}[]
 	label?: string | number
+}
+const formatPrice = (val: number, digits = 2) => {
+	return val.toLocaleString('en-US', {
+		minimumFractionDigits: digits,
+		maximumFractionDigits: digits,
+	})
 }
 
 const PriceTooltip: React.FC<PriceTooltipProps> = ({
@@ -95,10 +107,7 @@ const PriceTooltip: React.FC<PriceTooltipProps> = ({
 							className='ml-auto font-mono text-xl font-extrabold text-right'
 							style={{ color: entry.dataKey === 'BTC' ? '#FFD700' : '#00ffa5' }}
 						>
-							$
-							{entry.value?.toLocaleString('en-US', {
-								maximumFractionDigits: 2,
-							})}
+							${entry.value != null ? formatPrice(entry.value, 4) : '-'}
 						</span>
 					</div>
 				))}
@@ -119,6 +128,10 @@ export const CryptoChart: React.FC<CryptoChartProps> = ({ data }) => {
 	const [chartData, setChartData] = useState<ChartDatum[]>([])
 	const [timeframe, setTimeframe] = useState<ChartTimeframe>('24h')
 	const [chartType, setChartType] = useState<ChartType>('line')
+	const [tooltipData, setTooltipData] = useState<any>(null)
+	const [cursorPos, setCursorPos] = useState<{ x: number; y: number } | null>(
+		null
+	)
 
 	// Set current time on mount
 	useEffect(() => {
@@ -184,14 +197,46 @@ export const CryptoChart: React.FC<CryptoChartProps> = ({ data }) => {
 		fetchHistory()
 	}, [timeframe])
 
+	const handleMouseMove = useCallback((state: any) => {
+		if (state?.isTooltipActive && state.activePayload?.length > 0) {
+			const payload = state.activePayload[0].payload
+			setTooltipData({
+				time: payload.time,
+				BTC: payload.BTC,
+				BTCChange: payload.BTCChange,
+				SOL: payload.SOL,
+				SOLChange: payload.SOLChange,
+			})
+			setCursorPos({
+				x: state.chartX ?? 0,
+				y: state.chartY ?? 0,
+			})
+		} else {
+			setTooltipData(null)
+			setCursorPos(null)
+		}
+	}, [])
+
+	const handleMouseLeave = useCallback(() => {
+		setTooltipData(null)
+	}, [])
+
+	const handleTouchMove = handleMouseMove
+
+	const handlePointerMove = useCallback((state: any) => {
+		if (state && state.activePayload && state.activePayload.length) {
+			const payload = state.activePayload[0]
+			setTooltipData(payload.payload)
+			setCursorPos({ x: state.chartX, y: state.chartY })
+		}
+	}, [])
+
 	const btcVals = useMemo(() => chartData.map(d => d.BTC), [chartData])
 	const solVals = useMemo(() => chartData.map(d => d.SOL), [chartData])
 	const btcMin = Math.min(...btcVals)
 	const btcMax = Math.max(...btcVals)
 	const solMin = Math.min(...solVals)
 	const solMax = Math.max(...solVals)
-	const btcVolume = btcVals.reduce((acc, v) => acc + v, 0)
-	const solVolume = solVals.reduce((acc, v) => acc + v, 0)
 
 	const getChangeColor = (change: number) =>
 		change > 0
@@ -215,13 +260,16 @@ export const CryptoChart: React.FC<CryptoChartProps> = ({ data }) => {
 	if (chartType === 'split') {
 		ChartBlock = (
 			<div className='flex flex-col md:flex-row gap-8 lg:gap-12 mt-8 mb-10'>
-				<div className='flex-1 rounded-2xl p-6 lg:p-8 bg-gradient-to-br from-[#181d3b] to-[#181f2a]'>
-					<ResponsiveContainer
-						width='100%'
-						height={340}
-						className='pointer-events-none'
-					>
-						<LineChart className='glow-btc' data={chartData}>
+				<div className='flex-1 relative rounded-2xl p-6 lg:p-8 bg-gradient-to-br from-[#181d3b] to-[#181f2a]'>
+					<ResponsiveContainer width='100%' height={340}>
+						<LineChart
+							className='glow-btc cursor-pointer'
+							data={chartData}
+							onMouseMove={handleMouseMove}
+							onMouseLeave={handleMouseLeave}
+							onTouchMove={handleTouchMove}
+							onTouchEnd={handleMouseLeave}
+						>
 							<XAxis
 								dataKey='time'
 								tickFormatter={v => formatXAxis(Number(v), timeframe)}
@@ -233,10 +281,8 @@ export const CryptoChart: React.FC<CryptoChartProps> = ({ data }) => {
 								tick={{ fill: '#FFD700', fontSize: 16 }}
 								stroke='none'
 							/>
-							<Tooltip
-								content={props => <PriceTooltip {...props} />}
-								cursor={false}
-							/>
+							<Tooltip cursor={false} content={<PriceTooltip />} />
+
 							<Line
 								type='monotone'
 								isAnimationActive={false}
@@ -244,19 +290,55 @@ export const CryptoChart: React.FC<CryptoChartProps> = ({ data }) => {
 								name='Bitcoin'
 								stroke='#FFD700'
 								strokeWidth={4}
-								dot={true}
-								className='pointer-events-auto'
+								dot={<SplitDot dataKey='BTC' />}
+								className='pointer-events-auto cursor-pointer'
 							/>
 						</LineChart>
+						{/* {tooltipData && cursorPos && (
+							<motion.div
+								initial={{ opacity: 0 }}
+								animate={{ opacity: 1, x: cursorPos.x, y: cursorPos.y }}
+								transition={{ type: 'spring', stiffness: 160, damping: 22 }}
+								className='absolute z-1111 bg-slate-900/95 text-white px-4 py-2 rounded-xl shadow-lg pointer-events-none'
+								style={{
+									position: 'absolute',
+									pointerEvents: 'none',
+									left: cursorPos.x,
+									top: cursorPos.y,
+									minWidth: '140px',
+									borderRadius: '12px',
+									fontSize: '12px',
+									whiteSpace: 'nowrap',
+								}}
+							>
+								<div className='text-xs text-slate-400'>
+									{new Date(tooltipData.time).toLocaleString()}
+								</div>
+								{tooltipData?.BTC != null && (
+									<div className='font-bold text-yellow-400'>
+										BTC: ${formatPrice(tooltipData.BTC, 2)}
+									</div>
+								)}
+
+								{tooltipData?.SOL != null && (
+									<div className='font-bold text-yellow-400'>
+										SOL: ${formatPrice(tooltipData.SOL, 2)}
+									</div>
+								)}
+							</motion.div>
+						)} */}
 					</ResponsiveContainer>
 				</div>
-				<div className='flex-1 rounded-2xl p-6 lg:p-8 bg-gradient-to-br from-[#0c4035] to-[#26473b]'>
-					<ResponsiveContainer
-						width='100%'
-						height={340}
-						className='pointer-events-none'
-					>
-						<LineChart className='glow-sol' data={chartData}>
+				<div className='flex-1 relative rounded-2xl p-6 lg:p-8 bg-gradient-to-br from-[#0c4035] to-[#26473b]'>
+					<ResponsiveContainer width='100%' height={540}>
+						<LineChart
+							className='glow-sol cursor-pointer'
+							data={chartData}
+							onMouseMove={handleMouseMove}
+							onMouseLeave={handleMouseLeave}
+							onTouchMove={handleTouchMove}
+							onTouchEnd={handleMouseLeave}
+						>
 							<XAxis
 								dataKey='time'
 								tickFormatter={v => formatXAxis(Number(v), timeframe)}
@@ -264,14 +346,12 @@ export const CryptoChart: React.FC<CryptoChartProps> = ({ data }) => {
 								stroke='none'
 							/>
 							<YAxis
-								tickFormatter={v => `$${v}`}
+								tickFormatter={v => `${v}`}
 								tick={{ fill: '#00ffa5', fontSize: 16 }}
 								stroke='none'
 							/>
-							<Tooltip
-								content={props => <PriceTooltip {...props} />}
-								cursor={false}
-							/>
+							<Tooltip cursor={false} content={<PriceTooltip />} />
+
 							<Line
 								type='monotone'
 								isAnimationActive={false}
@@ -279,149 +359,226 @@ export const CryptoChart: React.FC<CryptoChartProps> = ({ data }) => {
 								name='Solana'
 								stroke='#00ffa5'
 								strokeWidth={4}
-								dot={true}
-								className='pointer-events-auto'
+								dot={<SplitDot dataKey='SOL' />}
+								className='pointer-events-auto cursor-pointer'
 							/>
 						</LineChart>
+						{tooltipData && cursorPos && (
+							<motion.div
+								initial={{ opacity: 0 }}
+								animate={{ opacity: 1, x: cursorPos.x, y: cursorPos.y }}
+								transition={{ type: 'spring', stiffness: 160, damping: 22 }}
+								className='absolute z-1111 bg-slate-900/95 text-white px-4 py-2 rounded-xl shadow-lg pointer-events-none'
+								style={{
+									position: 'absolute',
+									pointerEvents: 'none',
+									left: cursorPos.x,
+									top: cursorPos.y,
+									minWidth: '140px',
+									borderRadius: '12px',
+									fontSize: '12px',
+									whiteSpace: 'nowrap',
+								}}
+							>
+								<div className='text-xs text-slate-400'>
+									{new Date(tooltipData.time).toLocaleString()}
+								</div>
+								{tooltipData?.BTC != null && (
+									<div className='font-bold text-yellow-400'>
+										BTC: ${formatPrice(tooltipData.BTC, 2)}
+									</div>
+								)}
+
+								{tooltipData?.SOL != null && (
+									<div className='font-bold text-yellow-400'>
+										SOL: ${formatPrice(tooltipData.SOL, 2)}
+									</div>
+								)}
+							</motion.div>
+						)}
 					</ResponsiveContainer>
 				</div>
 			</div>
 		)
 	} else if (chartType === 'area') {
 		ChartBlock = (
-			<ResponsiveContainer
-				width='100%'
-				height={340}
-				className='pointer-events-none'
-			>
-				<AreaChart data={chartData}>
-					<defs>
-						<linearGradient
-							className='glow-btc'
-							id='btcarea'
-							x1='0'
-							x2='0'
-							y1='0'
-							y2='1'
+			<div className='relative'>
+				<ResponsiveContainer width='100%' height={540}>
+					<AreaChart
+						data={chartData}
+						margin={{ top: 20, right: 30, left: 0, bottom: 0 }}
+						onMouseLeave={handleMouseLeave}
+						onMouseMove={handleMouseMove}
+						onTouchEnd={handleMouseLeave}
+						onTouchMove={handleMouseMove}
+					>
+						<defs>
+							<linearGradient id='btcGradient' x1='0' y1='0' x2='0' y2='1'>
+								<stop offset='5%' stopColor='#FFD700' stopOpacity={0.4} />
+								<stop offset='95%' stopColor='#FFD700' stopOpacity={0} />
+							</linearGradient>
+							<linearGradient id='solGradient' x1='0' y1='0' x2='0' y2='1'>
+								<stop offset='5%' stopColor='#00ffa5' stopOpacity={0.4} />
+								<stop offset='95%' stopColor='#00ffa5' stopOpacity={0} />
+							</linearGradient>
+						</defs>
+						/* Grid */
+						<CartesianGrid strokeDasharray='13 13' stroke='#334155' />
+						/* Axes */
+						<XAxis
+							dataKey='time'
+							tickFormatter={v => formatXAxis(Number(v), timeframe)}
+							tick={{ fill: '#cbd5e1', fontSize: 14 }}
+							stroke='none'
+						/>
+						<YAxis
+							yAxisId='left'
+							tickFormatter={v => `${v}`}
+							tick={{ fill: '#FFD700' }}
+							type='number'
+							domain={['auto', 'auto']}
+						/>
+						<YAxis
+							yAxisId='right'
+							orientation='right'
+							tickFormatter={v => `${v}`}
+							tick={{ fill: '#00ffa5' }}
+							type='number'
+							domain={['auto', 'auto']}
+						/>
+						<FramerTooltip tooltipData={tooltipData} cursorPos={cursorPos} />
+						{/* Bitcoin Area */}
+						<motion.g
+							initial={{ opacity: 0 }}
+							animate={{ opacity: 1 }}
+							transition={{ duration: 1 }}
 						>
-							<stop offset='0%' stopColor='#FFD700' stopOpacity={0.34} />
-							<stop offset='98%' stopColor='#1b1f3d' stopOpacity={0.08} />
-						</linearGradient>
-						<linearGradient
-							className='glow-sol'
-							id='solarea'
-							x1='0'
-							x2='0'
-							y1='0'
-							y2='1'
+							<Area
+								yAxisId='left'
+								type='monotone'
+								dataKey='BTC'
+								stroke='#FFD700'
+								strokeWidth={3.5}
+								fill='url(#btcGradient)'
+								dot={<CustomDot dataKey='BTC' />}
+								isAnimationActive={true}
+								animationEasing='ease-in-out'
+								name='BTC'
+							/>
+						</motion.g>
+						{/* Solana Area */}
+						<motion.g
+							initial={{ opacity: 0 }}
+							animate={{ opacity: 1 }}
+							transition={{ duration: 1, delay: 0.2 }}
 						>
-							<stop offset='0%' stopColor='#00ffa5' stopOpacity={0.19} />
-							<stop offset='98%' stopColor='#123d35' stopOpacity={0.11} />
-						</linearGradient>
-					</defs>
-					<XAxis
-						dataKey='time'
-						tickFormatter={v => formatXAxis(Number(v), timeframe)}
-						tick={{ fill: '#cbd5e1', fontSize: 16 }}
-						stroke='none'
-					/>
-					<YAxis
-						yAxisId='left'
-						tickFormatter={v => `$${v}`}
-						tick={{ fill: '#FFD700', fontSize: 16 }}
-						stroke='none'
-					/>
-					<YAxis
-						yAxisId='right'
-						orientation='right'
-						tickFormatter={v => `$${v}`}
-						tick={{ fill: '#00ffa5', fontSize: 16 }}
-						stroke='none'
-					/>
-					<Tooltip
-						content={props => <PriceTooltip {...props} />}
-						cursor={false}
-					/>
-					<Area
-						yAxisId='left'
-						type='monotone'
-						isAnimationActive={false}
-						dataKey='BTC'
-						stroke='#FFD700'
-						fill='url(#btcarea)'
-						strokeWidth={3.5}
-						dot={true}
-						name='BTC'
-					/>
-					<Area
-						yAxisId='right'
-						type='monotone'
-						isAnimationActive={false}
-						dataKey='SOL'
-						stroke='#00ffa5'
-						fill='url(#solarea)'
-						strokeWidth={3.5}
-						dot={true}
-						name='SOL'
-					/>
-				</AreaChart>
-			</ResponsiveContainer>
+							<Area
+								yAxisId='right'
+								type='monotone'
+								dataKey='SOL'
+								stroke='#00ffa5'
+								strokeWidth={3.5}
+								fill='url(#solGradient)'
+								dot={<CustomDot dataKey='SOL' />}
+								isAnimationActive={true}
+								animationEasing='ease-in-out'
+								name='SOL'
+							/>
+						</motion.g>
+					</AreaChart>
+					<FramerTooltip tooltipData={tooltipData} cursorPos={cursorPos} />
+				</ResponsiveContainer>
+			</div>
 		)
 	} else {
 		ChartBlock = (
-			<ResponsiveContainer
-				width='100%'
-				height={340}
-				className='pointer-events-none'
-			>
-				<LineChart className='glow-btc' data={chartData}>
-					<XAxis
-						dataKey='time'
-						tickFormatter={v => formatXAxis(Number(v), timeframe)}
-						tick={{ fill: '#cbd5e1', fontSize: 16 }}
-						stroke='none'
-					/>
-					<YAxis
-						yAxisId='left'
-						tickFormatter={v => `$${v}`}
-						tick={{ fill: '#FFD700', fontSize: 16 }}
-						stroke='none'
-					/>
-					<YAxis
-						yAxisId='right'
-						orientation='right'
-						tickFormatter={v => `$${v}`}
-						tick={{ fill: '#00ffa5', fontSize: 16 }}
-						stroke='none'
-					/>
-					<Tooltip
-						content={props => <PriceTooltip {...props} />}
-						cursor={false}
-					/>
-					<Line
-						className='glow-btc, pointer-events-auto'
-						yAxisId='left'
-						type='monotone'
-						isAnimationActive={false}
-						dataKey='BTC'
-						stroke='#FFD700'
-						strokeWidth={4}
-						dot={true}
-						name='BTC'
-					/>
-					<Line
-						yAxisId='right'
-						type='monotone'
-						isAnimationActive={false}
-						dataKey='SOL'
-						stroke='#00ffa5'
-						strokeWidth={4}
-						dot={true}
-						name='SOL'
-						className='pointer-events-auto'
-					/>
-				</LineChart>
-			</ResponsiveContainer>
+			<div className='relative'>
+				<ResponsiveContainer width='100%' height={540}>
+					<LineChart
+						className='glow-btc cursor-pointer'
+						data={chartData}
+						onMouseMove={handleMouseMove}
+						onMouseLeave={handleMouseLeave}
+						onTouchMove={handleTouchMove}
+						onTouchEnd={handleMouseLeave}
+					>
+						<XAxis
+							dataKey='time'
+							tickFormatter={v => formatXAxis(Number(v), timeframe)}
+							tick={{ fill: '#cbd5e1', fontSize: 16 }}
+							stroke='none'
+						/>
+						<YAxis
+							yAxisId='left'
+							tickFormatter={v => `${v}`}
+							tick={{ fill: '#FFD700', fontSize: 16 }}
+							stroke='none'
+						/>
+						<YAxis
+							yAxisId='right'
+							orientation='right'
+							tickFormatter={v => `${v}`}
+							tick={{ fill: '#00ffa5', fontSize: 16 }}
+							stroke='none'
+						/>
+						<Tooltip cursor={false} content={<PriceTooltip />} />
+						<Line
+							className='glow-btc pointer-events-auto cursor-pointer'
+							yAxisId='left'
+							type='monotone'
+							isAnimationActive={false}
+							dataKey='BTC'
+							stroke='#FFD700'
+							strokeWidth={4}
+							dot={<CustomDot dataKey='BTC' />}
+							name='BTC'
+						/>
+						<Line
+							yAxisId='right'
+							type='monotone'
+							isAnimationActive={false}
+							dataKey='SOL'
+							stroke='#00ffa5'
+							strokeWidth={4}
+							dot={<CustomDot dataKey='SOL' />}
+							name='SOL'
+							className='pointer-events-auto cursor-pointer glow-sol'
+						/>
+					</LineChart>
+					{tooltipData && cursorPos && (
+						<motion.div
+							initial={{ opacity: 0 }}
+							animate={{ opacity: 1, x: cursorPos.x, y: cursorPos.y }}
+							transition={{ type: 'spring', stiffness: 160, damping: 22 }}
+							className='absolute z-1111 bg-slate-900/95 text-white px-4 py-2 rounded-xl shadow-lg pointer-events-none'
+							style={{
+								position: 'absolute',
+								pointerEvents: 'none',
+								left: cursorPos.x,
+								top: cursorPos.y,
+								minWidth: '140px',
+								borderRadius: '12px',
+								fontSize: '12px',
+								whiteSpace: 'nowrap',
+							}}
+						>
+							<div className='text-xs text-slate-400'>
+								{new Date(tooltipData.time).toLocaleString()}
+							</div>
+							{tooltipData?.BTC != null && (
+								<div className='font-bold text-yellow-400'>
+									BTC: {formatPrice(tooltipData.BTC, 2)}
+								</div>
+							)}
+							{tooltipData?.SOL != null && (
+								<div className='font-bold text-yellow-400'>
+									SOL: {formatPrice(tooltipData.SOL, 2)}
+								</div>
+							)}
+						</motion.div>
+					)}
+				</ResponsiveContainer>
+			</div>
 		)
 	}
 
@@ -468,17 +625,15 @@ export const CryptoChart: React.FC<CryptoChartProps> = ({ data }) => {
 									</td>
 									<td className='py-4 sm:py-5 px-3 sm:px-4 text-center font-black font-mono text-yellow-100 text-xl sm:text-2xl'>
 										$
-										{prices?.bitcoin.usd?.toLocaleString('en-US', {
-											minimumFractionDigits: 2,
-											maximumFractionDigits: 2,
-										})}
+										{prices?.bitcoin.usd != null
+											? `${formatPrice(prices.bitcoin.usd, 4)}`
+											: '-'}
 									</td>
 									<td className='py-4 sm:py-5 px-3 sm:px-4 text-center font-black font-mono text-green-100 text-xl sm:text-2xl'>
 										$
-										{prices?.solana.usd?.toLocaleString('en-US', {
-											minimumFractionDigits: 2,
-											maximumFractionDigits: 2,
-										})}
+										{prices?.solana.usd != null
+											? `${formatPrice(prices.solana.usd, 4)}`
+											: '-'}
 									</td>
 								</tr>
 								<tr className='border-b border-slate-700/50'>
@@ -537,15 +692,15 @@ export const CryptoChart: React.FC<CryptoChartProps> = ({ data }) => {
 									</td>
 									<td className='py-4 sm:py-5 px-3 sm:px-4 text-center font-mono text-slate-100 text-base sm:text-lg'>
 										$
-										{btcMax.toLocaleString('en-US', {
-											maximumFractionDigits: 2,
-										})}
+										{prices?.bitcoin.usd != null
+											? `${formatPrice(prices.bitcoin.usd, 4)}`
+											: '-'}
 									</td>
 									<td className='py-4 sm:py-5 px-3 sm:px-4 text-center font-mono text-slate-100 text-base sm:text-lg'>
 										$
-										{solMax.toLocaleString('en-US', {
-											maximumFractionDigits: 2,
-										})}
+										{prices?.solana.usd != null
+											? `${formatPrice(prices.solana.usd, 4)}`
+											: '-'}
 									</td>
 								</tr>
 								<tr>
@@ -554,15 +709,15 @@ export const CryptoChart: React.FC<CryptoChartProps> = ({ data }) => {
 									</td>
 									<td className='py-4 sm:py-5 px-3 sm:px-4 text-center font-mono text-slate-100 text-base sm:text-lg'>
 										$
-										{btcMin.toLocaleString('en-US', {
-											maximumFractionDigits: 2,
-										})}
+										{prices?.bitcoin.usd != null
+											? `${formatPrice(prices.bitcoin.usd, 4)}`
+											: '-'}
 									</td>
 									<td className='py-4 sm:py-5 px-3 sm:px-4 text-center font-mono text-slate-100 text-base sm:text-lg'>
 										$
-										{solMin.toLocaleString('en-US', {
-											maximumFractionDigits: 2,
-										})}
+										{prices?.solana.usd != null
+											? `${formatPrice(prices.solana.usd, 4)}`
+											: '-'}
 									</td>
 								</tr>
 							</tbody>
@@ -580,7 +735,7 @@ export const CryptoChart: React.FC<CryptoChartProps> = ({ data }) => {
 					<h3 className='text-center text-lg sm:text-xl font-bold text-slate-300 mb-4 sm:mb-5'>
 						Time Period
 					</h3>
-					<div className='flex flex-wrap justify-center gap-4 sm:gap-5 md:gap-6 relative z-0'>
+					<div className='flex flex-wrap justify-center gap-4 sm:gap-5 md:gap-6 relative'>
 						{buttons.map(btn => (
 							<button
 								key={btn.value}
@@ -599,7 +754,7 @@ export const CryptoChart: React.FC<CryptoChartProps> = ({ data }) => {
 									WebkitTapHighlightColor: 'transparent',
 									border: 'none',
 								}}
-								className='transition-all duration-200 ease-out px-12 sm:px-14 md:px-16 py-5 sm:py-6 rounded-2xl font-black text-xl sm:text-2xl min-w-[130px] sm:min-w-[150px] shadow-lg hover:scale-105 active:scale-95 outline-none focus:ring-4 focus:ring-yellow-400/50 cursor-pointer'
+								className='transition-all duration-200 ease-out px-12 sm:px-14 md:px-16 py-5 sm:py-6 rounded-2xl font-black text-xl sm:text-2xl min-w-[130px] sm:min-w-[150px] shadow-lg hover:scale-105 active:scale-95 outline-none focus:ring-4 focus:ring-yellow-400/50 cursor-pointer z-10 pointer-events-auto'
 							>
 								{btn.label}
 							</button>
@@ -612,7 +767,7 @@ export const CryptoChart: React.FC<CryptoChartProps> = ({ data }) => {
 					<h3 className='text-center text-lg sm:text-xl font-bold text-slate-300 mb-4 sm:mb-5'>
 						Chart Type
 					</h3>
-					<div className='flex flex-wrap justify-center gap-4 sm:gap-5 md:gap-6 relative z-0'>
+					<div className='flex flex-wrap justify-center gap-4 sm:gap-5 md:gap-6 relative'>
 						{chartBtns.map(btn => (
 							<button
 								key={btn.value}
@@ -626,12 +781,11 @@ export const CryptoChart: React.FC<CryptoChartProps> = ({ data }) => {
 										chartType === btn.value
 											? `0 0 20px ${btn.color}dd, 0 4px 12px rgba(0,0,0,0.3)`
 											: '0 2px 8px rgba(0,0,0,0.2)',
-									cursor: 'pointer',
 									userSelect: 'none',
 									WebkitTapHighlightColor: 'transparent',
 									border: 'none',
 								}}
-								className='transition-all duration-200 ease-out px-12 sm:px-14 md:px-16 py-5 sm:py-6 rounded-2xl font-black text-xl sm:text-2xl min-w-[130px] sm:min-w-[160px] shadow-lg hover:scale-105 active:scale-95 outline-none focus:ring-4 focus:ring-green-400/50 cursor-pointer'
+								className='transition-all duration-200 ease-out px-12 sm:px-14 md:px-16 py-5 sm:py-6 rounded-2xl font-black text-xl sm:text-2xl min-w-[130px] sm:min-w-[160px] shadow-lg hover:scale-105 active:scale-95 outline-none focus:ring-4 focus:ring-green-400/50 cursor-pointer z-10 pointer-events-auto'
 							>
 								{btn.label}
 							</button>

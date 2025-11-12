@@ -24,22 +24,18 @@ export default function Home({ data }: HomeProps) {
 	}, [])
 
 	return (
-		<div className='min-h-screen bg-[radial-gradient(circle_at_60%_20%,_#2B3169_0%,_#0c134f_80%)] overflow-x-hidden px-0 pb-0 pt-0'>
+		<div className='min-h-screen bg-[radial-gradient(circle_at_60%_20%,_#2B3169_0%,_#0c134f_80%)] overflow-x-hidden px-0 pb-0 pt-0 pointer-events-none'>
 			{/* Animated Background */}
-			<div className='fixed inset-0 overflow-hidden pointer-events-none'>
+			<div className='fixed inset-0 overflow-hidden'>
 				<motion.div
-					className='absolute w-[800px] h-[800px] bg-gradient-to-br from-blue-500/20 to-purple-500/20 rounded-full blur-3xl'
+					className='absolute w-[800px] h-[800px] bg-gradient-to-br from-blue-500/50 to-purple-500/50 rounded-full blur-3xl'
 					animate={{
 						x: [0, 120, 0],
 						y: [0, 110, 0],
 						scale: [1, 1.12, 1],
-						opacity: [0.7, 0.85, 0.7],
+						opacity: [0.5, 0.8, 0.5],
 					}}
-					transition={{
-						duration: 22,
-						repeat: Infinity,
-						ease: 'easeInOut',
-					}}
+					transition={{ duration: 22, repeat: Infinity, ease: 'easeInOut' }}
 					style={{ top: '8%', left: '-18%' }}
 				/>
 				<motion.div
@@ -48,7 +44,7 @@ export default function Home({ data }: HomeProps) {
 						x: [0, -90, 0],
 						y: [0, -60, 0],
 						scale: [1, 1.18, 1],
-						opacity: [0.6, 0.95, 0.6],
+						opacity: [0.4, 0.9, 0.4],
 					}}
 					transition={{
 						duration: 19,
